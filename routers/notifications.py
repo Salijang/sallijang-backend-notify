@@ -31,6 +31,7 @@ async def get_store_owner_id(store_id: int) -> Optional[int]:
 
 @router.get("/", response_model=List[schemas.NotificationResponse])
 async def list_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
+    """사용자의 알림 목록을 최신순으로 최대 50건 반환합니다."""
     result = await db.execute(
         select(models.Notification)
         .filter(models.Notification.user_id == user_id)
@@ -42,6 +43,7 @@ async def list_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{notification_id}/read")
 async def mark_read(notification_id: int, db: AsyncSession = Depends(get_db)):
+    """단일 알림을 읽음 처리합니다."""
     result = await db.execute(
         select(models.Notification).filter(models.Notification.id == notification_id)
     )
@@ -55,6 +57,7 @@ async def mark_read(notification_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/read-all")
 async def mark_all_read(user_id: int, db: AsyncSession = Depends(get_db)):
+    """사용자의 읽지 않은 알림을 모두 읽음 처리합니다."""
     result = await db.execute(
         select(models.Notification).filter(
             models.Notification.user_id == user_id,

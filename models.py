@@ -6,6 +6,7 @@ KST = timezone(timedelta(hours=9))
 
 
 def kst_now() -> datetime:
+    """현재 한국 표준시(KST, UTC+9)를 반환합니다."""
     return datetime.now(KST).replace(tzinfo=None)
 
 

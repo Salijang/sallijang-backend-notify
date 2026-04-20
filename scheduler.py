@@ -15,6 +15,7 @@ PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8001")
 
 
 async def _get_store_owner_id(store_id: int) -> Optional[int]:
+    """Product Service에서 store_id로 owner_id를 조회합니다. 실패 시 None 반환."""
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -103,6 +104,7 @@ async def check_pickup_reminders():
 
 
 def create_scheduler() -> AsyncIOScheduler:
+    """픽업 리마인더 잡이 등록된 APScheduler 인스턴스를 생성합니다."""
     scheduler = AsyncIOScheduler(
         executors={"default": AsyncIOExecutor()},
         timezone="Asia/Seoul",

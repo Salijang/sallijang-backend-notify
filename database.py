@@ -16,5 +16,6 @@ Base = declarative_base()
 
 
 async def get_db():
+    """FastAPI dependency: DB 세션을 생성하고 요청 처리 후 자동 종료합니다."""
     async with SessionLocal() as session:
         yield session
