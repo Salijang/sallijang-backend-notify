@@ -1,16 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
-from database import engine, Base
+from database import engine
 from routers import notifications
 from scheduler import create_scheduler
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     scheduler = create_scheduler()
     scheduler.start()
     yield
