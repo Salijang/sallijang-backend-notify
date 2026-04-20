@@ -29,6 +29,41 @@ async def get_store_owner_id(store_id: int) -> Optional[int]:
     return None
 
 
+async def get_settings(user_id: int, db: AsyncSession) -> models.NotificationSettings:
+    """설정 조회 (없으면 기본값 레코드 생성)"""
+    result = await db.execute(
+        select(models.NotificationSettings).filter(models.NotificationSettings.user_id == user_id)
+    )
+    settings = result.scalars().first()
+    if not settings:
+        settings = models.NotificationSettings(user_id=user_id)
+        db.add(settings)
+        await db.commit()
+        await db.refresh(settings)
+    return settings
+
+
+@router.get("/settings/{user_id}", response_model=schemas.NotificationSettingsResponse)
+async def get_notification_settings(user_id: int, db: AsyncSession = Depends(get_db)):
+    return await get_settings(user_id, db)
+
+
+@router.patch("/settings/{user_id}", response_model=schemas.NotificationSettingsResponse)
+async def update_notification_settings(
+    user_id: int,
+    body: schemas.NotificationSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await get_settings(user_id, db)
+    if body.new_order is not None:
+        settings.new_order = body.new_order
+    if body.review is not None:
+        settings.review = body.review
+    await db.commit()
+    await db.refresh(settings)
+    return settings
+
+
 @router.get("/", response_model=List[schemas.NotificationResponse])
 async def list_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
     """사용자의 알림 목록을 최신순으로 최대 50건 반환합니다."""
@@ -103,15 +138,37 @@ async def handle_order_event(
     if seller_event is not None:
         seller_user_id = await get_store_owner_id(payload.store_id)
         if seller_user_id:
-            db.add(models.Notification(
-                user_id=seller_user_id,
-                event_type=seller_event,
-                order_id=payload.order_id,
-                order_number=payload.order_number,
-                store_name=payload.store_name,
-                product_names=product_names_str,
-                pickup_expected_at=payload.pickup_expected_at,
-            ))
+            seller_settings = await get_settings(seller_user_id, db)
+            if seller_settings.new_order:
+                db.add(models.Notification(
+                    user_id=seller_user_id,
+                    event_type=seller_event,
+                    order_id=payload.order_id,
+                    order_number=payload.order_number,
+                    store_name=payload.store_name,
+                    product_names=product_names_str,
+                    pickup_expected_at=payload.pickup_expected_at,
+                ))
 
     await db.commit()
+    return {"ok": True}
+
+
+@router.post("/internal/review-event", status_code=201)
+async def handle_review_event(
+    payload: schemas.ReviewEventPayload,
+    db: AsyncSession = Depends(get_db),
+):
+    """Product Service에서 리뷰 작성 시 호출하는 내부 엔드포인트."""
+    seller_user_id = await get_store_owner_id(payload.store_id)
+    if seller_user_id:
+        seller_settings = await get_settings(seller_user_id, db)
+        if seller_settings.review:
+            db.add(models.Notification(
+                user_id=seller_user_id,
+                event_type="new_review",
+                store_name=payload.store_name,
+                product_names=f"별점 {payload.rating}점",
+            ))
+            await db.commit()
     return {"ok": True}

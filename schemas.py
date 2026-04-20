@@ -17,6 +17,26 @@ class NotificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class NotificationSettingsResponse(BaseModel):
+    user_id: int
+    new_order: bool
+    review: bool
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationSettingsUpdate(BaseModel):
+    new_order: Optional[bool] = None
+    review: Optional[bool] = None
+
+
+class ReviewEventPayload(BaseModel):
+    """Product Service → Notify Service 리뷰 이벤트 페이로드"""
+    store_id: int
+    store_name: str
+    buyer_id: int
+    rating: int
+
+
 class OrderEventPayload(BaseModel):
     """Order Service → Notify Service 이벤트 페이로드"""
     event_type: str  # order_confirmed | pickup_completed | order_cancelled

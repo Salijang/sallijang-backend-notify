@@ -10,6 +10,17 @@ def kst_now() -> datetime:
     return datetime.now(KST).replace(tzinfo=None)
 
 
+class NotificationSettings(Base):
+    __tablename__ = "notification_settings"
+    __table_args__ = {"schema": "notification_schema"}
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, unique=True, index=True)
+    new_order = Column(Boolean, default=True, nullable=False)
+    review = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=kst_now)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = {"schema": "notification_schema"}
