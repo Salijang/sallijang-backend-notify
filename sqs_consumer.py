@@ -3,9 +3,12 @@ import boto3
 import json
 import os
 from typing import Callable, Awaitable
+from botocore.config import Config
 
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+
+_BOTO_CONFIG = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2})
 
 
 async def start_consumer(process_fn: Callable[[dict], Awaitable[None]]) -> None:
@@ -15,7 +18,7 @@ async def start_consumer(process_fn: Callable[[dict], Awaitable[None]]) -> None:
         return
 
     def _receive():
-        sqs = boto3.client("sqs", region_name=AWS_REGION)
+        sqs = boto3.client("sqs", region_name=AWS_REGION, config=_BOTO_CONFIG)
         return sqs.receive_message(
             QueueUrl=SQS_QUEUE_URL,
             MaxNumberOfMessages=10,
@@ -23,7 +26,7 @@ async def start_consumer(process_fn: Callable[[dict], Awaitable[None]]) -> None:
         )
 
     def _delete(receipt_handle: str):
-        sqs = boto3.client("sqs", region_name=AWS_REGION)
+        sqs = boto3.client("sqs", region_name=AWS_REGION, config=_BOTO_CONFIG)
         sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
 
     print("[SQS Consumer] 시작")
