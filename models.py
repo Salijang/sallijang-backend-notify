@@ -18,6 +18,7 @@ class NotificationSettings(Base):
     user_id = Column(Integer, nullable=False, unique=True, index=True)
     new_order = Column(Boolean, default=True, nullable=False)
     review = Column(Boolean, default=True, nullable=False)
+    slack_webhook_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=kst_now)
 
 

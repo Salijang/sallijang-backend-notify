@@ -67,6 +67,8 @@ async def update_notification_settings(
         settings.new_order = body.new_order
     if body.review is not None:
         settings.review = body.review
+    if body.slack_webhook_url is not None:
+        settings.slack_webhook_url = body.slack_webhook_url or None
     await db.commit()
     await db.refresh(settings)
     return settings
@@ -122,11 +124,10 @@ async def mark_all_read(
     return {"ok": True}
 
 
-@router.post("/internal/order-event", status_code=201)
-async def handle_order_event(
-    payload: schemas.OrderEventPayload,
-    db: AsyncSession = Depends(get_db),
-):
+async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: AsyncSession) -> None:
+    """SQS 컨슈머와 HTTP 엔드포인트 양쪽에서 재사용하는 주문 이벤트 처리 로직."""
+    from sns_client import publish_slack_event
+
     product_names_str = ", ".join(payload.product_names)
 
     if payload.event_type == "order_confirmed":
@@ -164,8 +165,24 @@ async def handle_order_event(
                     product_names=product_names_str,
                     pickup_expected_at=payload.pickup_expected_at,
                 ))
+                if seller_event == "new_order" and seller_settings.slack_webhook_url:
+                    await publish_slack_event({
+                        "webhook_url": seller_settings.slack_webhook_url,
+                        "store_name": payload.store_name,
+                        "order_number": payload.order_number,
+                        "product_names": product_names_str,
+                        "pickup_expected_at": payload.pickup_expected_at or "",
+                    })
 
     await db.commit()
+
+
+@router.post("/internal/order-event", status_code=201)
+async def handle_order_event(
+    payload: schemas.OrderEventPayload,
+    db: AsyncSession = Depends(get_db),
+):
+    await handle_order_event_logic(payload, db)
     return {"ok": True}
 
 
