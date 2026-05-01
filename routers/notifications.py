@@ -6,6 +6,7 @@ import os
 import httpx
 
 from database import get_db
+from deps import get_current_user, CurrentUser
 import models
 import schemas
 
@@ -15,7 +16,6 @@ PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8001")
 
 
 async def get_store_owner_id(store_id: int) -> Optional[int]:
-    """Product Service에서 store_id로 owner_id를 조회합니다."""
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -30,7 +30,6 @@ async def get_store_owner_id(store_id: int) -> Optional[int]:
 
 
 async def get_settings(user_id: int, db: AsyncSession) -> models.NotificationSettings:
-    """설정 조회 (없으면 기본값 레코드 생성)"""
     result = await db.execute(
         select(models.NotificationSettings).filter(models.NotificationSettings.user_id == user_id)
     )
@@ -44,7 +43,13 @@ async def get_settings(user_id: int, db: AsyncSession) -> models.NotificationSet
 
 
 @router.get("/settings/{user_id}", response_model=schemas.NotificationSettingsResponse)
-async def get_notification_settings(user_id: int, db: AsyncSession = Depends(get_db)):
+async def get_notification_settings(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     return await get_settings(user_id, db)
 
 
@@ -53,7 +58,10 @@ async def update_notification_settings(
     user_id: int,
     body: schemas.NotificationSettingsUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     settings = await get_settings(user_id, db)
     if body.new_order is not None:
         settings.new_order = body.new_order
@@ -65,11 +73,13 @@ async def update_notification_settings(
 
 
 @router.get("/", response_model=List[schemas.NotificationResponse])
-async def list_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
-    """사용자의 알림 목록을 최신순으로 최대 50건 반환합니다."""
+async def list_notifications(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     result = await db.execute(
         select(models.Notification)
-        .filter(models.Notification.user_id == user_id)
+        .filter(models.Notification.user_id == current_user.user_id)
         .order_by(models.Notification.created_at.desc())
         .limit(50)
     )
@@ -77,25 +87,32 @@ async def list_notifications(user_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{notification_id}/read")
-async def mark_read(notification_id: int, db: AsyncSession = Depends(get_db)):
-    """단일 알림을 읽음 처리합니다."""
+async def mark_read(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     result = await db.execute(
         select(models.Notification).filter(models.Notification.id == notification_id)
     )
     notif = result.scalars().first()
     if not notif:
         raise HTTPException(status_code=404, detail="Notification not found")
+    if notif.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     notif.is_read = True
     await db.commit()
     return {"ok": True}
 
 
 @router.patch("/read-all")
-async def mark_all_read(user_id: int, db: AsyncSession = Depends(get_db)):
-    """사용자의 읽지 않은 알림을 모두 읽음 처리합니다."""
+async def mark_all_read(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     result = await db.execute(
         select(models.Notification).filter(
-            models.Notification.user_id == user_id,
+            models.Notification.user_id == current_user.user_id,
             models.Notification.is_read == False,
         )
     )
@@ -110,10 +127,8 @@ async def handle_order_event(
     payload: schemas.OrderEventPayload,
     db: AsyncSession = Depends(get_db),
 ):
-    """Order Service에서 주문 상태 변경 시 호출하는 내부 엔드포인트."""
     product_names_str = ", ".join(payload.product_names)
 
-    # 취소 주체에 따라 구매자/판매자 이벤트 타입 결정
     if payload.event_type == "order_confirmed":
         buyer_event, seller_event = "order_confirmed", "new_order"
     elif payload.event_type == "order_cancelled_by_buyer":
@@ -159,7 +174,6 @@ async def handle_review_event(
     payload: schemas.ReviewEventPayload,
     db: AsyncSession = Depends(get_db),
 ):
-    """Product Service에서 리뷰 작성 시 호출하는 내부 엔드포인트."""
     seller_user_id = await get_store_owner_id(payload.store_id)
     if seller_user_id:
         seller_settings = await get_settings(seller_user_id, db)
