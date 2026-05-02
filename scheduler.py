@@ -39,7 +39,7 @@ async def check_pickup_reminders():
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{ORDER_SERVICE_URL}/api/v1/orders/?status=pending", timeout=10.0
+                f"{ORDER_SERVICE_URL}/api/v1/orders/internal/pending", timeout=10.0
             )
         if resp.status_code != 200:
             return

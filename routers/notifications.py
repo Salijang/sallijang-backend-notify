@@ -167,6 +167,7 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
                 ))
                 if seller_event == "new_order" and seller_settings.slack_webhook_url:
                     await publish_slack_event({
+                        "event_type": seller_event,
                         "webhook_url": seller_settings.slack_webhook_url,
                         "store_name": payload.store_name,
                         "order_number": payload.order_number,

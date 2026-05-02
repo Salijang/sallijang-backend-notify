@@ -9,6 +9,14 @@ SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
 AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
 
 _BOTO_CONFIG = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2})
+_sqs_client = None
+
+
+def _get_sqs():
+    global _sqs_client
+    if _sqs_client is None:
+        _sqs_client = boto3.client("sqs", region_name=AWS_REGION, config=_BOTO_CONFIG)
+    return _sqs_client
 
 
 async def start_consumer(process_fn: Callable[[dict], Awaitable[None]]) -> None:
@@ -18,16 +26,14 @@ async def start_consumer(process_fn: Callable[[dict], Awaitable[None]]) -> None:
         return
 
     def _receive():
-        sqs = boto3.client("sqs", region_name=AWS_REGION, config=_BOTO_CONFIG)
-        return sqs.receive_message(
+        return _get_sqs().receive_message(
             QueueUrl=SQS_QUEUE_URL,
             MaxNumberOfMessages=10,
             WaitTimeSeconds=20,  # Long Polling
         )
 
     def _delete(receipt_handle: str):
-        sqs = boto3.client("sqs", region_name=AWS_REGION, config=_BOTO_CONFIG)
-        sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
+        _get_sqs().delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
 
     print("[SQS Consumer] 시작")
     while True:
