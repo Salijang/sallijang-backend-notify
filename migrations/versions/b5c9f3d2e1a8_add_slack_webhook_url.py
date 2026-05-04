@@ -16,10 +16,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'notification_settings',
-        sa.Column('slack_webhook_url', sa.String(), nullable=True),
-        schema='notification_schema'
+    op.execute(
+        "ALTER TABLE notification_schema.notification_settings "
+        "ADD COLUMN IF NOT EXISTS slack_webhook_url VARCHAR"
     )
 
 
