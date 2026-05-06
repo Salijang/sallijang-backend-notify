@@ -68,3 +68,9 @@ jobs:
           git add kustomization.yaml
           git diff --cached --quiet || git commit -m "chore(notify): update image tag to ${{ github.sha }} [skip ci]"
           git push origin main
+
+      - name: Build and upload Lambda to S3
+        run: |
+          cd lambda
+          zip sns-notify.zip handler.py
+          aws s3 cp sns-notify.zip s3://${{ secrets.LAMBDA_CODE_S3_BUCKET }}/lambda/sns-notify.zip
