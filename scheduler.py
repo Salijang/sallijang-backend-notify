@@ -8,10 +8,26 @@ import httpx
 
 import models
 from database import SessionLocal
+from redis_sse import publish_sse
 
 KST = timezone(timedelta(hours=9))
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:8002")
 PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8001")
+
+
+def _notif_to_dict(notif: models.Notification) -> dict:
+    return {
+        "id": notif.id,
+        "user_id": notif.user_id,
+        "event_type": notif.event_type,
+        "order_id": notif.order_id,
+        "order_number": notif.order_number,
+        "store_name": notif.store_name,
+        "product_names": notif.product_names,
+        "pickup_expected_at": notif.pickup_expected_at,
+        "is_read": notif.is_read,
+        "created_at": notif.created_at.isoformat() if notif.created_at else None,
+    }
 
 
 async def _get_store_owner_id(store_id: int) -> Optional[int]:
@@ -32,7 +48,6 @@ async def check_pickup_reminders():
     """매 분 실행: 픽업 15분 전 주문에 대해 알림을 생성합니다."""
     now = datetime.now(KST).replace(tzinfo=None)
 
-    # 13~17분 후 픽업 예정 범위 (2분 여유로 중복 방지는 DB 체크로 처리)
     time_min = (now + timedelta(minutes=13)).strftime("%H:%M")
     time_max = (now + timedelta(minutes=17)).strftime("%H:%M")
 
@@ -49,6 +64,8 @@ async def check_pickup_reminders():
         return
 
     async with SessionLocal() as db:
+        notifications_to_publish: list[tuple[models.Notification, int]] = []
+
         for order in orders:
             pickup_at: Optional[str] = order.get("pickup_expected_at")
             if not pickup_at:
@@ -59,7 +76,6 @@ async def check_pickup_reminders():
 
             order_id: int = order["id"]
 
-            # 이미 픽업 알림이 생성된 주문이면 스킵
             existing = await db.execute(
                 select(models.Notification).filter(
                     models.Notification.order_id == order_id,
@@ -73,8 +89,7 @@ async def check_pickup_reminders():
                 item["product_name"] for item in order.get("items", [])
             )
 
-            # 구매자 알림
-            db.add(models.Notification(
+            buyer_notif = models.Notification(
                 user_id=order["buyer_id"],
                 event_type="pickup_reminder",
                 order_id=order_id,
@@ -82,14 +97,15 @@ async def check_pickup_reminders():
                 store_name=order["store_name"],
                 product_names=product_names,
                 pickup_expected_at=pickup_at,
-            ))
+            )
+            db.add(buyer_notif)
+            notifications_to_publish.append((buyer_notif, order["buyer_id"]))
 
-            # 판매자 알림
             store_id = order.get("store_id")
             if store_id:
                 seller_user_id = await _get_store_owner_id(store_id)
                 if seller_user_id:
-                    db.add(models.Notification(
+                    seller_notif = models.Notification(
                         user_id=seller_user_id,
                         event_type="pickup_reminder",
                         order_id=order_id,
@@ -97,9 +113,16 @@ async def check_pickup_reminders():
                         store_name=order["store_name"],
                         product_names=product_names,
                         pickup_expected_at=pickup_at,
-                    ))
+                    )
+                    db.add(seller_notif)
+                    notifications_to_publish.append((seller_notif, seller_user_id))
 
         await db.commit()
+
+        for notif, user_id in notifications_to_publish:
+            await db.refresh(notif)
+            await publish_sse(f"sse:notify:{user_id}", _notif_to_dict(notif))
+
         print(f"[Scheduler] 픽업 알림 체크 완료 ({now.strftime('%H:%M')})")
 
 

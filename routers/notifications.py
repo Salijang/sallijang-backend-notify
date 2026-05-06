@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
@@ -7,6 +9,7 @@ import httpx
 
 from database import get_db
 from deps import get_current_user, CurrentUser
+from redis_sse import get_redis, publish_sse
 import models
 import schemas
 
@@ -42,6 +45,21 @@ async def get_settings(user_id: int, db: AsyncSession) -> models.NotificationSet
     return settings
 
 
+def _notif_to_dict(notif: models.Notification) -> dict:
+    return {
+        "id": notif.id,
+        "user_id": notif.user_id,
+        "event_type": notif.event_type,
+        "order_id": notif.order_id,
+        "order_number": notif.order_number,
+        "store_name": notif.store_name,
+        "product_names": notif.product_names,
+        "pickup_expected_at": notif.pickup_expected_at,
+        "is_read": notif.is_read,
+        "created_at": notif.created_at.isoformat() if notif.created_at else None,
+    }
+
+
 @router.get("/settings/{user_id}", response_model=schemas.NotificationSettingsResponse)
 async def get_notification_settings(
     user_id: int,
@@ -72,6 +90,41 @@ async def update_notification_settings(
     await db.commit()
     await db.refresh(settings)
     return settings
+
+
+@router.get("/stream")
+async def stream_notifications(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    user_id = current_user.user_id
+
+    async def generator():
+        r = await get_redis()
+        pubsub = r.pubsub()
+        channel = f"sse:notify:{user_id}"
+        await pubsub.subscribe(channel)
+        try:
+            while True:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+                if message:
+                    yield f"data: {message['data']}\n\n"
+                else:
+                    yield ": ping\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/", response_model=List[schemas.NotificationResponse])
@@ -141,7 +194,9 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
     else:
         buyer_event, seller_event = payload.event_type, payload.event_type
 
-    db.add(models.Notification(
+    notifications_to_publish: list[tuple[models.Notification, int]] = []
+
+    buyer_notif = models.Notification(
         user_id=payload.buyer_id,
         event_type=buyer_event,
         order_id=payload.order_id,
@@ -149,14 +204,17 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
         store_name=payload.store_name,
         product_names=product_names_str,
         pickup_expected_at=payload.pickup_expected_at,
-    ))
+    )
+    db.add(buyer_notif)
+    notifications_to_publish.append((buyer_notif, payload.buyer_id))
 
+    seller_user_id = None
     if seller_event is not None:
         seller_user_id = await get_store_owner_id(payload.store_id)
         if seller_user_id:
             seller_settings = await get_settings(seller_user_id, db)
             if seller_settings.new_order:
-                db.add(models.Notification(
+                seller_notif = models.Notification(
                     user_id=seller_user_id,
                     event_type=seller_event,
                     order_id=payload.order_id,
@@ -164,7 +222,9 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
                     store_name=payload.store_name,
                     product_names=product_names_str,
                     pickup_expected_at=payload.pickup_expected_at,
-                ))
+                )
+                db.add(seller_notif)
+                notifications_to_publish.append((seller_notif, seller_user_id))
                 if seller_settings.slack_webhook_url and seller_event in ("new_order", "order_cancelled"):
                     await publish_slack_event({
                         "event_type": seller_event,
@@ -176,6 +236,10 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
                     })
 
     await db.commit()
+
+    for notif, user_id in notifications_to_publish:
+        await db.refresh(notif)
+        await publish_sse(f"sse:notify:{user_id}", _notif_to_dict(notif))
 
 
 @router.post("/internal/order-event", status_code=201)
@@ -196,11 +260,14 @@ async def handle_review_event(
     if seller_user_id:
         seller_settings = await get_settings(seller_user_id, db)
         if seller_settings.review:
-            db.add(models.Notification(
+            notif = models.Notification(
                 user_id=seller_user_id,
                 event_type="new_review",
                 store_name=payload.store_name,
                 product_names=f"별점 {payload.rating}점",
-            ))
+            )
+            db.add(notif)
             await db.commit()
+            await db.refresh(notif)
+            await publish_sse(f"sse:notify:{seller_user_id}", _notif_to_dict(notif))
     return {"ok": True}
