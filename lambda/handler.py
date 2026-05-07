@@ -3,11 +3,13 @@ import urllib.request
 import urllib.error
 
 _EVENT_LABELS = {
-    "new_order":        "🛒 신규 주문",
-    "order_confirmed":  "✅ 주문 확인",
-    "order_cancelled":  "❌ 주문 취소",
-    "pickup_completed": "🎉 픽업 완료",
-    "pickup_reminder":  "⏰ 픽업 리마인더",
+    "new_order":           "🛒 신규 주문",
+    "order_confirmed":     "✅ 주문 확인",
+    "order_cancelled":     "❌ 주문 취소",
+    "order_cancelled_self": "❌ 주문 취소",
+    "pickup_completed":    "🎉 픽업 완료",
+    "pickup_reminder":     "⏰ 픽업 리마인더",
+    "new_review":          "⭐ 새 리뷰",
 }
 
 

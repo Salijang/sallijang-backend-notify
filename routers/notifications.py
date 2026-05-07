@@ -177,10 +177,22 @@ async def mark_all_read(
     return {"ok": True}
 
 
+async def _send_slack(settings: models.NotificationSettings, event_type: str, store_name: str, order_number: str, product_names: str, pickup_expected_at: str) -> None:
+    if not settings.slack_webhook_url:
+        return
+    from sns_client import publish_slack_event
+    await publish_slack_event({
+        "event_type": event_type,
+        "webhook_url": settings.slack_webhook_url,
+        "store_name": store_name,
+        "order_number": order_number or "",
+        "product_names": product_names or "",
+        "pickup_expected_at": pickup_expected_at or "",
+    })
+
+
 async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: AsyncSession) -> None:
     """SQS 컨슈머와 HTTP 엔드포인트 양쪽에서 재사용하는 주문 이벤트 처리 로직."""
-    from sns_client import publish_slack_event
-
     product_names_str = ", ".join(payload.product_names)
 
     if payload.event_type == "order_confirmed":
@@ -207,6 +219,7 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
     )
     db.add(buyer_notif)
     notifications_to_publish.append((buyer_notif, payload.buyer_id))
+    buyer_settings = await get_settings(payload.buyer_id, db)
 
     seller_user_id = None
     if seller_event is not None:
@@ -225,15 +238,9 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
                 )
                 db.add(seller_notif)
                 notifications_to_publish.append((seller_notif, seller_user_id))
-                if seller_settings.slack_webhook_url and seller_event in ("new_order", "order_cancelled"):
-                    await publish_slack_event({
-                        "event_type": seller_event,
-                        "webhook_url": seller_settings.slack_webhook_url,
-                        "store_name": payload.store_name,
-                        "order_number": payload.order_number,
-                        "product_names": product_names_str,
-                        "pickup_expected_at": payload.pickup_expected_at or "",
-                    })
+                await _send_slack(seller_settings, seller_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
+
+    await _send_slack(buyer_settings, buyer_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
 
     await db.commit()
 
@@ -267,6 +274,7 @@ async def handle_review_event(
                 product_names=f"별점 {payload.rating}점",
             )
             db.add(notif)
+            await _send_slack(seller_settings, "new_review", payload.store_name, "", f"별점 {payload.rating}점", "")
             await db.commit()
             await db.refresh(notif)
             await publish_sse(f"sse:notify:{seller_user_id}", _notif_to_dict(notif))

@@ -9,6 +9,7 @@ import httpx
 import models
 from database import SessionLocal
 from redis_sse import publish_sse
+from sns_client import publish_slack_event
 
 KST = timezone(timedelta(hours=9))
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:8002")
