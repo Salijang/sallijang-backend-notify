@@ -21,6 +21,7 @@ class NotificationSettingsResponse(BaseModel):
     user_id: int
     new_order: bool
     review: bool
+    slack_enabled: bool
     slack_webhook_url: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -28,6 +29,7 @@ class NotificationSettingsResponse(BaseModel):
 class NotificationSettingsUpdate(BaseModel):
     new_order: Optional[bool] = None
     review: Optional[bool] = None
+    slack_enabled: Optional[bool] = None
     slack_webhook_url: Optional[str] = None
 
 

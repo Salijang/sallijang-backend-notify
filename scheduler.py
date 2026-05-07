@@ -9,11 +9,10 @@ import httpx
 import models
 from database import SessionLocal
 from redis_sse import publish_sse
-from sns_client import publish_slack_event
+from routers.notifications import get_settings
 
 KST = timezone(timedelta(hours=9))
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:8002")
-PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8001")
 
 
 def _notif_to_dict(notif: models.Notification) -> dict:
@@ -30,19 +29,6 @@ def _notif_to_dict(notif: models.Notification) -> dict:
         "created_at": notif.created_at.isoformat() if notif.created_at else None,
     }
 
-
-async def _get_store_owner_id(store_id: int) -> Optional[int]:
-    """Product Service에서 store_id로 owner_id를 조회합니다. 실패 시 None 반환."""
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{PRODUCT_SERVICE_URL}/api/v1/stores/{store_id}", timeout=5.0
-            )
-        if resp.status_code == 200:
-            return resp.json().get("owner_id")
-    except Exception:
-        pass
-    return None
 
 
 async def check_pickup_reminders():
@@ -90,6 +76,10 @@ async def check_pickup_reminders():
                 item["product_name"] for item in order.get("items", [])
             )
 
+            buyer_settings = await get_settings(order["buyer_id"], db)
+            if not buyer_settings.new_order:
+                continue
+
             buyer_notif = models.Notification(
                 user_id=order["buyer_id"],
                 event_type="pickup_reminder",
@@ -101,22 +91,6 @@ async def check_pickup_reminders():
             )
             db.add(buyer_notif)
             notifications_to_publish.append((buyer_notif, order["buyer_id"]))
-
-            store_id = order.get("store_id")
-            if store_id:
-                seller_user_id = await _get_store_owner_id(store_id)
-                if seller_user_id:
-                    seller_notif = models.Notification(
-                        user_id=seller_user_id,
-                        event_type="pickup_reminder",
-                        order_id=order_id,
-                        order_number=order["order_number"],
-                        store_name=order["store_name"],
-                        product_names=product_names,
-                        pickup_expected_at=pickup_at,
-                    )
-                    db.add(seller_notif)
-                    notifications_to_publish.append((seller_notif, seller_user_id))
 
         await db.commit()
 
