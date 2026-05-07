@@ -40,6 +40,12 @@ jobs:
           LAMBDA_BUCKET=$(aws ssm get-parameter --name /pickup/prod/s3/lambda-bucket-name --query Parameter.Value --output text)
           echo "LAMBDA_CODE_S3_BUCKET=$LAMBDA_BUCKET" >> $GITHUB_ENV
 
+      - name: Build and upload Lambda to S3
+        run: |
+          cd lambda
+          zip sns-notify.zip handler.py
+          aws s3 cp sns-notify.zip s3://${{ env.LAMBDA_CODE_S3_BUCKET }}/lambda/sns-notify.zip
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -76,9 +82,3 @@ jobs:
           git add kustomization.yaml
           git diff --cached --quiet || git commit -m "chore(notify): update image tag to ${{ github.sha }} [skip ci]"
           git push origin main
-
-      - name: Build and upload Lambda to S3
-        run: |
-          cd lambda
-          zip sns-notify.zip handler.py
-          aws s3 cp sns-notify.zip s3://${{ env.LAMBDA_CODE_S3_BUCKET }}/lambda/sns-notify.zip
