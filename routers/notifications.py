@@ -85,6 +85,8 @@ async def update_notification_settings(
         settings.new_order = body.new_order
     if body.review is not None:
         settings.review = body.review
+    if body.slack_enabled is not None:
+        settings.slack_enabled = body.slack_enabled
     if body.slack_webhook_url is not None:
         settings.slack_webhook_url = body.slack_webhook_url or None
     await db.commit()
