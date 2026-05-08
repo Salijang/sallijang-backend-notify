@@ -270,6 +270,7 @@ async def handle_review_event(
     seller_user_id = await get_store_owner_id(payload.store_id)
     if seller_user_id:
         seller_settings = await get_settings(seller_user_id, db)
+        await _send_slack(seller_settings, "new_review", payload.store_name, "", f"별점 {payload.rating}점", "")
         if seller_settings.review:
             notif = models.Notification(
                 user_id=seller_user_id,
@@ -278,7 +279,6 @@ async def handle_review_event(
                 product_names=f"별점 {payload.rating}점",
             )
             db.add(notif)
-            await _send_slack(seller_settings, "new_review", payload.store_name, "", f"별점 {payload.rating}점", "")
             await db.commit()
             await db.refresh(notif)
             await publish_sse(f"sse:notify:{seller_user_id}", _notif_to_dict(notif))
