@@ -47,7 +47,7 @@ class OrderEventPayload(BaseModel):
     order_id: int
     order_number: str
     buyer_id: int
-    store_id: int
+    store_id: Optional[int] = None
     store_name: str
     product_names: List[str]
     pickup_expected_at: Optional[str] = None

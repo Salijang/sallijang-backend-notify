@@ -228,7 +228,7 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
             notifications_to_publish.append((buyer_notif, payload.buyer_id))
             await _send_slack(buyer_settings, buyer_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
 
-    if seller_event is not None:
+    if seller_event is not None and payload.store_id:
         seller_user_id = await get_store_owner_id(payload.store_id)
         if seller_user_id:
             seller_settings = await get_settings(seller_user_id, db)
