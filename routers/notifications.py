@@ -214,6 +214,7 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
 
     if buyer_event is not None:
         buyer_settings = await get_settings(payload.buyer_id, db)
+        await _send_slack(buyer_settings, buyer_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
         if buyer_settings.new_order:
             buyer_notif = models.Notification(
                 user_id=payload.buyer_id,
@@ -226,12 +227,12 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
             )
             db.add(buyer_notif)
             notifications_to_publish.append((buyer_notif, payload.buyer_id))
-            await _send_slack(buyer_settings, buyer_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
 
     if seller_event is not None and payload.store_id:
         seller_user_id = await get_store_owner_id(payload.store_id)
         if seller_user_id:
             seller_settings = await get_settings(seller_user_id, db)
+            await _send_slack(seller_settings, seller_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
             if seller_settings.new_order:
                 seller_notif = models.Notification(
                     user_id=seller_user_id,
@@ -244,7 +245,6 @@ async def handle_order_event_logic(payload: schemas.OrderEventPayload, db: Async
                 )
                 db.add(seller_notif)
                 notifications_to_publish.append((seller_notif, seller_user_id))
-                await _send_slack(seller_settings, seller_event, payload.store_name, payload.order_number, product_names_str, payload.pickup_expected_at or "")
 
     await db.commit()
 
